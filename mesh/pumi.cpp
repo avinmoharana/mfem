@@ -768,7 +768,7 @@ void ParPumiMesh::UpdateMesh(const ParMesh* AdaptedpMesh)
    // Destroy the ParMesh data fields.
    delete pncmesh;
    pncmesh = NULL;
-
+   
    DeleteFaceNbrData();
 
    for (int i = 0; i < shared_edges.Size(); i++)
@@ -958,12 +958,14 @@ void ParPumiMesh::FieldMFEMtoPUMI(apf::Mesh2* apf_mesh,
       ip.Set(pt_crd, 3);
    }
    // Dofs on Edges
-   if (VelFieldShape->hasNodesIn(apf::Mesh::EDGE))
+   const int ne = VelFieldShape->countNodesOn(apf::Mesh::EDGE);
+   //if (VelFieldShape->hasNodesIn(apf::Mesh::EDGE))
+   if (ne > 0)
    {
-      const int nn = VelFieldShape->countNodesOn(apf::Mesh::EDGE);
+      //const int nn = VelFieldShape->countNodesOn(apf::Mesh::EDGE);
       for (int ii = 0; ii < 6; ii++)
       {
-         for (int jj = 0; jj < nn; jj++)
+         for (int jj = 0; jj < ne; jj++)
          {
             VelFieldShape->getNodeXi(apf::Mesh::EDGE, jj, xi_crd);
             xi_crd[0] = 0.5 * (xi_crd[0] + 1.);// from (-1,1) to (0,1)
@@ -978,7 +980,7 @@ void ParPumiMesh::FieldMFEMtoPUMI(apf::Mesh2* apf_mesh,
                   pt_crd[1] = xi_crd[0];
                   break;
                case 2:
-                  pt_crd[1] = xi_crd[0];
+                  pt_crd[1] = 1.0 - xi_crd[0];
                   break;
                case 3:
                   pt_crd[2] = xi_crd[0];
@@ -998,9 +1000,12 @@ void ParPumiMesh::FieldMFEMtoPUMI(apf::Mesh2* apf_mesh,
       }
    }
    // Dofs on Faces
-   if (VelFieldShape->hasNodesIn(apf::Mesh::TRIANGLE))
+   const int nn = VelFieldShape->countNodesOn(apf::Mesh::TRIANGLE);
+
+   //if (VelFieldShape->hasNodesIn(apf::Mesh::TRIANGLE))
+   if (nn > 0)
    {
-      const int nn = VelFieldShape->countNodesOn(apf::Mesh::TRIANGLE);
+      //const int nn = VelFieldShape->countNodesOn(apf::Mesh::TRIANGLE);
       for (int ii = 0; ii < 4; ii++)
       {
          for (int jj = 0; jj < nn; jj++)
@@ -1397,7 +1402,7 @@ void ParPumiMesh::VectorFieldMFEMtoPUMI(apf::Mesh2* apf_mesh,
                   pt_crd[1] = xi_crd[0];
                   break;
                case 2:
-                  pt_crd[1] = xi_crd[0];
+                  pt_crd[1] = 1.0 - xi_crd[0];
                   break;
                case 3:
                   pt_crd[2] = xi_crd[0];
@@ -1492,7 +1497,15 @@ void ParPumiMesh::VectorFieldMFEMtoPUMI(apf::Mesh2* apf_mesh,
          int num_edge =  apf_mesh->getDownward(ent, apf::Mesh::EDGE, edges);
          for (int ii = 0 ; ii < num_edge; ++ii)
          {
-            es->alignSharedNodes(apf_mesh, ent, edges[ii], order);
+            //es->alignSharedNodes(apf_mesh, ent, edges[ii], order);
+            if (ndOnEdge > 1)
+            {
+               es->alignSharedNodes(apf_mesh, ent, edges[ii], order);
+            }
+            else
+            {
+               order[0] = 0;
+            }
             for (int jj = 0; jj < ndOnEdge; jj++)
             {
                int cnt = dofId + order[jj];
@@ -1510,11 +1523,15 @@ void ParPumiMesh::VectorFieldMFEMtoPUMI(apf::Mesh2* apf_mesh,
             dofId += ndOnEdge;
          }
       }
-
+      
       // Face Dofs
-      if (VelFieldShape->hasNodesIn(apf::Mesh::TRIANGLE))
+      int ndOnFace = VelFieldShape->countNodesOn(apf::Mesh::TRIANGLE);
+
+      //if (VelFieldShape->hasNodesIn(apf::Mesh::TRIANGLE))
+      if (ndOnFace > 0)
       {
-         int ndOnFace = VelFieldShape->countNodesOn(apf::Mesh::TRIANGLE);
+         //int ndOnFace = VelFieldShape->countNodesOn(apf::Mesh::TRIANGLE);
+         std::cout<<" number of nodes on face from pumi mesh "<<ndOnFace<<std::endl;
          Array<int> order(ndOnFace);
 
          apf::Downward faces;
@@ -1546,11 +1563,105 @@ void ParPumiMesh::VectorFieldMFEMtoPUMI(apf::Mesh2* apf_mesh,
             dofId += ndOnFace;
          }
       }
-
       iel++;
    }
    apf_mesh->end(itr);
 }
+
+void ParPumiMesh::VectorFieldPUMItoMFEM(apf::Mesh2* apf_mesh,
+                                  apf::Field* VectorField,
+                                  ParGridFunction* Vel)
+{
+   // Find local numbering
+   v_num_loc = apf_mesh->findNumbering("LocalVertexNumbering");
+
+   // Loop over field to copy
+   int nc = apf::countComponents(VectorField);
+   apf::DynamicVector nd_vel(nc);
+   //getShape(VectorField);
+   double *VelData = Vel->GetData();
+   int tot_vtxs_nds = int(Vel->Size() / nc);
+   Ordering::Type Ord = Vel->FESpace()->GetOrdering();
+
+   apf::MeshEntity* ent;
+   apf::MeshIterator* itr = apf_mesh->begin(0);
+   if (Ord == Ordering::byNODES) // xxx...yyy...zzz
+   {
+      while ((ent = apf_mesh->iterate(itr)))
+      {
+         unsigned int id = apf::getNumber(v_num_loc, ent, 0, 0);
+         apf::getComponents(VectorField, ent, 0, &nd_vel[0]);
+         for (int kk = 0; kk < nc; kk++)
+         {
+           VelData[tot_vtxs_nds * kk + id] = nd_vel[kk];
+         }
+      }
+      apf_mesh->end(itr);
+   }
+   else // xyz, xyz,....
+   {
+      while ((ent = apf_mesh->iterate(itr)))
+      {
+         unsigned int id = apf::getNumber(v_num_loc, ent, 0, 0);
+         apf::getComponents(VectorField, ent, 0, &nd_vel[0]);
+         int index = 3 * id;
+         for (int kk = 0; kk < nc; kk++)
+         {
+             VelData[index + kk] = nd_vel[kk];
+         }
+      }
+      apf_mesh->end(itr);
+   }
+
+   // Check for higher order
+   if ( Vel->FESpace()->GetOrder(1) > 1 )
+   {
+      // Assume all element type are the same i.e. tetrahedral
+      const FiniteElement* H1_elem = Vel->FESpace()->GetFE(1);
+      const IntegrationRule &All_nodes = H1_elem->GetNodes();
+      int nnodes = All_nodes.Size();
+
+      // Loop over elements
+      int iel = 0;
+      itr = apf_mesh->begin(3);
+      while ((ent = apf_mesh->iterate(itr)))
+      {
+         Array<int> vdofs;
+         Vel->FESpace()->GetElementVDofs(iel, vdofs);
+
+         // Create PUMI element to interpolate
+         apf::MeshElement* mE = apf::createMeshElement(apf_mesh, ent);
+         apf::Element* elem = apf::createElement(VectorField, mE);
+
+         // Vertices are already interpolated
+         for (int ip = 0; ip < nnodes; ip++) //num_vert
+         {
+            // Take parametric coordinates of the node
+            apf::Vector3 param;
+            param[0] = All_nodes.IntPoint(ip).x;
+            param[1] = All_nodes.IntPoint(ip).y;
+            param[2] = All_nodes.IntPoint(ip).z;
+
+            // Compute the interpolating coordinates
+            apf::DynamicVector phCrd(nc);
+            apf::getComponents(elem, param, &phCrd[0]);
+
+            // Fill the nodes list
+            for (int kk = 0; kk < nc; ++kk)
+            {
+               int dof_ctr = ip + kk * nnodes;
+               (Vel->GetData())[vdofs[dof_ctr]] = phCrd[kk];
+            }
+         }
+         iel++;
+         apf::destroyElement(elem);
+         apf::destroyMeshElement(mE);
+      }
+      apf_mesh->end(itr);
+   }
+
+}
+
 
 void ParPumiMesh::FieldPUMItoMFEM(apf::Mesh2* apf_mesh,
                                   apf::Field* ScalarField,
@@ -1621,6 +1732,114 @@ void ParPumiMesh::FieldPUMItoMFEM(apf::Mesh2* apf_mesh,
       }
       apf_mesh->end(itr);
    }
+}
+
+void ParPumiMesh::DGFieldMFEMtoPUMI(apf::Mesh2* apf_mesh,
+                                  ParGridFunction* grid_pr,
+                                  apf::Field* PrField)
+{
+   apf::FieldShape* PrFieldShape = getShape(PrField);
+   // Assuming all DG nodes are classified on volume
+   const int ndOnVol = PrFieldShape->countNodesOn(apf::Mesh::TET);
+
+   // Define integration points
+   IntegrationRule pumi_nodes(ndOnVol);
+   int ip_cnt = 0; 
+   apf::Vector3 xi_crd(0.,0.,0.);
+
+   // Create a template of dof holders coordinates in parametric coordinates.
+   // The ordering is taken care of when the field is transferred to PUMI.
+   // Dofs on Volume
+   if (PrFieldShape->hasNodesIn(3))
+   {
+      double pt_crd[3] = {1./3., 1./3., 1./3.};
+      /*for (int ii = 0; ii < ndOnVol; ++ii)
+      {
+        PrFieldShape->getNodeXi(apf::Mesh::TET, ii, xi_crd);  
+        pt_crd[0] = xi_crd[0];
+        pt_crd[1] = xi_crd[1];
+        pt_crd[2] = xi_crd[2];
+        IntegrationPoint& ip = pumi_nodes.IntPoint(ip_cnt++);
+        ip.Set(pt_crd, 3);        
+      }*/
+      IntegrationPoint& ip = pumi_nodes.IntPoint(ip_cnt++);
+      ip.Set(pt_crd, 3);
+   }
+   MFEM_ASSERT(ip_cnt == ndOnVol, "");
+
+   // Other dofs
+   apf::MeshEntity* ent;
+   apf::MeshIterator* itr = apf_mesh->begin(3);
+   int iel = 0;
+   while ((ent = apf_mesh->iterate(itr)))
+   {
+      // Get the solution
+      Vector pr;
+      grid_pr->GetValues(iel, pumi_nodes, pr, 1);
+
+      // Transfer field to nodes classified on volume
+      for (int kk = 0; kk < ndOnVol; kk++)
+      {
+          apf::setScalar(PrField, ent, kk, pr[kk]);
+      }
+
+      iel++;
+   }
+   apf_mesh->end(itr);
+}
+
+void ParPumiMesh::DGFieldPUMItoMFEM(apf::Mesh2* apf_mesh,
+                                  apf::Field* PUMIField,
+                                  ParGridFunction* MFEMgf)
+{
+   // Loop over field to copy
+   apf::MeshEntity* ent; 
+   apf::MeshIterator* itr; 
+
+   // Assume all element type are the same i.e. tetrahedral
+   const FiniteElement* L2_elem = MFEMgf->FESpace()->GetFE(1);
+   const IntegrationRule &All_nodes = L2_elem->GetNodes();
+   int nnodes = All_nodes.Size();
+
+   // Loop over elements
+   int nc = apf::countComponents(PUMIField);
+   int iel = 0; 
+   itr = apf_mesh->begin(3);
+   while ((ent = apf_mesh->iterate(itr)))
+   {
+       Array<int> vdofs;
+       MFEMgf->FESpace()->GetElementVDofs(iel, vdofs);
+
+       // Create PUMI element to interpolate
+       apf::MeshElement* mE = apf::createMeshElement(apf_mesh, ent);
+       apf::Element* elem = apf::createElement(PUMIField, mE); 
+
+       // DG nodes 
+       for (int ip = 0; ip < nnodes; ip++)
+       {
+           // Take parametric coordinates of the node
+           apf::Vector3 param;
+           param[0] = All_nodes.IntPoint(ip).x;
+           param[1] = All_nodes.IntPoint(ip).y;
+           param[2] = All_nodes.IntPoint(ip).z;
+
+           // Compute the interpolating coordinates
+           apf::DynamicVector phCrd(nc);
+           apf::getComponents(elem, param, &phCrd[0]);
+
+           // Fill the nodes list
+           for (int kk = 0; kk < nc; ++kk)
+           {
+              int dof_ctr = ip + kk * nnodes;
+              (MFEMgf->GetData())[vdofs[dof_ctr]] = phCrd[kk];
+           }
+        }
+        iel++;
+        apf::destroyElement(elem);
+        apf::destroyMeshElement(mE);
+   }
+      apf_mesh->end(itr);
+
 }
 
 }

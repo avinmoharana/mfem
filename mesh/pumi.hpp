@@ -30,7 +30,7 @@
 #include "mesh.hpp"
 #include "pmesh.hpp"
 
-#include <pumi.h>
+//#include <pumi.h>
 #include <apf.h>
 #include <apfMesh2.h>
 #include <apfShape.h>
@@ -102,6 +102,11 @@ public:
                               apf::Field* VelField,
                               apf::Field* VelMagField);
 
+   /// Transfer DG field from MFEM mesh to PUMI mesh [Scalar].
+   void DGFieldMFEMtoPUMI(apf::Mesh2* apf_mesh,
+                          ParGridFunction* grid_pr,
+                          apf::Field* PrField);
+
    /// Update the mesh after adaptation.
    void UpdateMesh(const ParMesh* AdaptedpMesh);
 
@@ -109,6 +114,16 @@ public:
    void FieldPUMItoMFEM(apf::Mesh2* apf_mesh,
                         apf::Field* ScalarField,
                         ParGridFunction* Pr);
+
+   /// Transfer a field from PUMI to MFEM after mesh adapt [Vector].   
+   void VectorFieldPUMItoMFEM(apf::Mesh2* apf_mesh,
+                              apf::Field* VectorField,
+                              ParGridFunction* Vel);
+
+   /// Transfer a DG field from PUMI to MFEM after mesh adapt [Scalar, VECTOR].
+   void DGFieldPUMItoMFEM(apf::Mesh2* apf_mesh,
+                         apf::Field* PUMIField,
+                         ParGridFunction* Pr); 
 
    virtual ~ParPumiMesh() { }
 };
